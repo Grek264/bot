@@ -1,5 +1,5 @@
 from random import randint
-
+import asyncio
 import os
 import threading
 from multiprocessing import Process
@@ -25,17 +25,19 @@ from aiogram.types import ReplyKeyboardRemove, \
 
 from config import TOKEN
 from config import API_KEY
+from config import ADMIN_PASS
 
 import requests
 from bs4 import BeautifulSoup
-
+bot_loop = asyncio.new_event_loop()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 import pandas as pd
-cols = [1,2,3,4]
-global ch_log
+cols = [1,2,3,4,5]
+global ch_log , con_adm_rig
 ch_log = 0
+con_adm_rig = 0
 user_base = pd.read_excel('user_base.xlsx',usecols=cols)
 user_base.head()
 
@@ -47,6 +49,7 @@ async def cmd_random(message: types.Message):
 @dp.callback_query_handler(text="random_value")
 async def send_random_value(call: types.CallbackQuery):
     await call.message.answer(str(randint(1, 6)))
+    await call.message.answer( "/start\n/help\n/func_menu")
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
@@ -67,6 +70,7 @@ async def process_start_command(message: types.Message):
                     log = index
                     await bot.send_message(message.from_user.id,"Приветствую " + user_name_base[index] + " чем я могу вам помочь ? \nДля получения справки ввидите команду /help")
                     time_update(user_id=user_id)
+    await bot.send_message(message.from_user.id,"/start\n/help\n/func_menu")
     return user_id_base , user_name_base
 def time_update (user_id):
     global user_base
@@ -91,10 +95,58 @@ async def process_help_command(message: types.Message):
     user_id = message.from_user.id
     time_update(user_id=user_id)
 
+@dp.message_handler(commands=['func_menu'])
+async def func_menu(message: types.Message):
+    user_id = message.from_user.id
+    user_id_base = user_base['id'].tolist()
+    time_update(user_id=user_id)
+    log = -1
+    while log == -1:
+        for index in range(len(user_base)):
+            if user_id_base[index] == user_id:
+                log = index
+    admin_base = user_base['admin'].tolist()
+    if admin_base[index] == False:
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton(text="Какой сегодня день", callback_data="What day is today"))
+        keyboard.add(types.InlineKeyboardButton(text="Подключить права администратора", callback_data="Connect administrator rights" ))
+        await message.answer("Выберите одну из следующих функций", reply_markup=keyboard)
+    elif admin_base[index] == True:
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton(text="Просмотреть базу данных о пользвателях", callback_data="view database"))
+        keyboard.add(types.InlineKeyboardButton(text="Какой сегодня день", callback_data="What day is today"))
+        await message.answer("Выберите одну из следующих функций", reply_markup=keyboard)
+
+@dp.callback_query_handler(text="What day is today")
+async def What_day_is_today(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    time_update(user_id=user_id)
+    url = 'https://my-calend.ru/holidays/'
+    response = requests.get(url)
+    page = BeautifulSoup(response.text, "lxml")
+    page = page.text
+    page = page[(page.find('Праздники сегодня ') + 22):page.find('Именины отмечают')]
+    dictionary = {"\xa0": "", "   ": "\n", "    ": "\n", "0": "", "1": " ", "2": "", "3": "", "4": "",
+                  "5": "", "6": "", "7": "", "8": "", "9": "", "  ": "", "\n ": "\n"}
+    page = multiple_replace(page, dictionary)
+    await call.message.answer( "Сегодня: \n" + page)
+    await call.message.answer("/start\n/help\n/func_menu")
+
+@dp.callback_query_handler(text="view database")
+async def view_database(call: types.CallbackQuery):
+    await call.message.answer(user_base)
+    await call.message.answer("/start\n/help\n/func_menu")
+
+@dp.callback_query_handler(text="Connect administrator rights")
+async def Connect_administrator_rights(call: types.CallbackQuery):
+    await call.message.answer("Укажите пароль для получения прав Администратора")
+    global con_adm_rig
+    con_adm_rig = 1
 
 @dp.callback_query_handler(text="feature list")
 async def feature_list(call: types.CallbackQuery):
     await call.message.answer("Вот что я умею:\nотвечать на ваше приветсттвие\nПоказывать погоду в указаном вами городе\nБросать кубик через команду /dice\nРассказывать какой сегодня день")
+    await call.message.answer("/start\n/help\n/func_menu")
 
 @dp.callback_query_handler(text="Change nickname")
 async def Change_nickname(call: types.CallbackQuery):
@@ -107,13 +159,13 @@ def multiple_replace(page, dictionary):
         return page
 @dp.message_handler()
 async def processing_message(message: types.Message):
-    global user_base ,user_name_base ,ch_log
+    global user_base ,user_name_base ,ch_log , con_adm_rig
     user_id_base = user_base['id'].tolist()
     user_name_base = user_base['name'].tolist()
     user_id = message.from_user.id
     if (user_id in user_id_base) == False:
-        new_user = {'id':[user_id],'name':[message.text]}
-        df = pd.DataFrame(new_user,columns=['id','name'])
+        new_user = {'id':[user_id],'name':[message.text],'admin':["false"]}
+        df = pd.DataFrame(new_user,columns=['id','name','admin'])
         user_base = pd.concat([user_base,df], ignore_index=True, sort=False)
         user_base.to_excel("user_base.xlsx")
         await bot.send_message(message.from_user.id,"Отлично я успешно внёс вас в базу данных")
@@ -130,6 +182,20 @@ async def processing_message(message: types.Message):
                     user_base.to_excel("user_base.xlsx")
                     await bot.send_message(message.from_user.id, "Отлично я успешно сменил ваш ник на " + message.text)
                     ch_log = 0
+    elif con_adm_rig == 1:
+        time_update(user_id=user_id)
+        if message.text == ADMIN_PASS:
+            log = -1
+            while log == -1:
+                for index in range(len(user_base)):
+                    if user_id_base[index] == user_id:
+                        log = index
+                        user_base.at[index, 'admin'] = "true"
+                        user_base.to_excel("user_base.xlsx")
+                        await bot.send_message(message.from_user.id,"Вы успешно получили права администратора")
+        else:
+            await bot.send_message(message.from_user.id,"Неверный пароль")
+        con_adm_rig == 0
     elif message.text == "Привет" or message.text == "привет":
         status_base = user_base['status'].tolist()
         log = -1
@@ -137,11 +203,12 @@ async def processing_message(message: types.Message):
             for index in range (len(user_base)):
                 if user_id_base[index] == user_id:
                     log = index
-                    status_base = user_base['status'].tolist()
                     if status_base[index] == 'Online':
                         await bot.send_message(message.from_user.id, 'Привет ' + user_name_base[index])
+                        await bot.send_message(message.from_user.id,"/start\n/help\n/func_menu")
                     else:
                         await bot.send_message(message.from_user.id, 'Привет ' + user_name_base[index] + ' давно не виделись')
+                        await bot.send_message(message.from_user.id, "/start\n/help\n/func_menu")
                     time_update(user_id=user_id)
     elif "Погода в" in message.text:
        a =  message.text[9:len(message.text)]
@@ -159,21 +226,15 @@ async def processing_message(message: types.Message):
             f3 = translator.translate( list[(list.find("wind") + 7):(list.find("deg")-2)],  src='en', dest='ru')
             res = "Погода:" + f1.text  + "\nТемпература:" + f2.text+ " C" + "\nВетер:" + f3.text + "м/с"
             await bot.send_message(message.from_user.id,res)
+            await bot.send_message(message.from_user.id, "/start\n/help\n/func_menu")
        else:
            await bot.send_message(message.from_user.id, "Город не найден")
-    elif "Какой сегодня день" in message.text or "какой сегодня день" in message.text:
-        time_update(user_id=user_id)
-        url = 'https://my-calend.ru/holidays/'
-        response = requests.get(url)
-        page = BeautifulSoup(response.text, "lxml")
-        page = page.text
-        page = page[(page.find('Праздники сегодня ') + 22):page.find('Именины отмечают')]
-        dictionary = {"\xa0": "","   ": "\n","    ": "\n",  "0": "", "1": " ", "2": "", "3": "", "4": "",
-                "5": "", "6": "", "7": "", "8": "", "9": "" ,"  ":"" ,"\n ":"\n"}
-        page = multiple_replace(page, dictionary)
-        await bot.send_message(message.from_user.id, "Сегодня: \n" + page)
+           await bot.send_message(message.from_user.id, "/start\n/help\n/func_menu")
+    elif message.text == ADMIN_PASS:
+        return 1
     elif (user_id in user_id_base) != False:
         await bot.send_message(message.from_user.id, 'непонял вас')
+        await bot.send_message(message.from_user.id, "/start\n/help\n/func_menu")
         time_update(user_id=user_id)
 
 def base_call(id , message):
@@ -187,13 +248,12 @@ def base_call(id , message):
     print(records)
     cursor.close()
     conn.close()
-
-@dp.message_handler()
 async def send_message(id ,message):
-    await bot.send_message(chat_id=id, text=message)
-def status_chek():
+    await bot.send_message(id,message)
+
+async def status_chek():
+    print('start')
     while True:
-        # await bot.send_message(message.from_user.id, 'status_chek started')
         now = datetime.now()
         print("status_chek started:"+str(now))
         current_time_m = int(now.strftime("%M"))
@@ -205,7 +265,6 @@ def status_chek():
             t_1 = int((time_base[index][6]) + (time_base[index][7]))
             t_2 = int((time_base[index][3]) + (time_base[index][4]))
             t_3 = int((time_base[index][0]) + (time_base[index][1]))
-            # current_time = now.strftime("%H:%M:%S")
             if t_3 < current_time_d:
                 user_base.at[index, 'status'] = "offline"
                 user_base.to_excel("user_base.xlsx")
@@ -220,14 +279,15 @@ def status_chek():
                 else:
                     user_base.at[index, 'status'] = "Online"
                     user_base.to_excel("user_base.xlsx")
-
-        # await send_message(chat_id=1258306656,text=message.text)
-        # send_message(1258306656,"status_chek complite")
+        # await send_message(1258306656,"status_chek completed:" + str(now))
         now = datetime.now()
         print("status_chek completed:" + str(now))
-        time.sleep(60*30)
+        await asyncio.sleep(60*30)
 
-threading.Thread(target=status_chek,args=(),daemon=True).start()
+#threading.Thread(target=status_chek,args=(),daemon=True).start()
 
 if __name__ == '__main__':
-    executor.start_polling(dp)
+    myloop = asyncio.new_event_loop()
+    myloop.create_task(status_chek())
+    myloop.create_task(dp.start_polling())
+    myloop.run_forever()
