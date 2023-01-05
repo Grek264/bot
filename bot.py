@@ -1,15 +1,11 @@
 from random import randint
 import asyncio
 import os
-import threading
-from multiprocessing import Process
-from threading import Thread, Lock
 
 import time
 
 import psycopg2
 
-import googletrans
 from googletrans import Translator
 
 import pymorphy2
@@ -18,10 +14,6 @@ from datetime import datetime
 
 from aiogram import Bot, types
 from aiogram.dispatcher import Dispatcher
-from aiogram.utils import executor
-from aiogram.types import ReplyKeyboardRemove, \
-    ReplyKeyboardMarkup, KeyboardButton, \
-    InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import TOKEN
 from config import API_KEY
@@ -34,15 +26,21 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 import pandas as pd
-cols = [1,2,3,4,5]
-global ch_log , con_adm_rig
+cols = [1,2,3,4,5,6]
+global ch_log , con_adm_rig ,ip_list,element
+element = 0
+ip_list =[]
 ch_log = 0
 con_adm_rig = 0
+Im_sear = 0
 user_base = pd.read_excel('user_base.xlsx',usecols=cols)
 user_base.head()
 
+
 @dp.message_handler(commands="dice")
 async def cmd_random(message: types.Message):
+    user_id = message.from_user.id
+    time_update(user_id=user_id)
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton(text="бросить кубик", callback_data="random_value"))
     await message.answer("Нажмите на кнопку, чтобы бот бросил кубик", reply_markup=keyboard)
@@ -68,7 +66,7 @@ async def process_start_command(message: types.Message):
             for index in range (len(user_base)):
                 if user_id_base[index] == user_id:
                     log = index
-                    await bot.send_message(message.from_user.id,"Приветствую " + user_name_base[index] + " чем я могу вам помочь ? \nДля получения справки ввидите команду /help")
+                    await bot.send_message(message.from_user.id,f"Приветствую {user_name_base[index]} чем я могу вам помочь ? \nДля получения справки ввидите команду /help")
                     time_update(user_id=user_id)
     await bot.send_message(message.from_user.id,"/start\n/help\n/dice\n/func_menu")
     return user_id_base , user_name_base
@@ -110,12 +108,15 @@ async def func_menu(message: types.Message):
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(text="Какой сегодня день", callback_data="What day is today"))
         keyboard.add(types.InlineKeyboardButton(text="Подключить права администратора", callback_data="Connect administrator rights" ))
+        keyboard.add(types.InlineKeyboardButton(text="Подобрать фон для рабочего стола", callback_data="Image search"))
         await message.answer("Выберите одну из следующих функций", reply_markup=keyboard)
     elif admin_base[index] == "YES":
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(text="Просмотреть базу данных о пользвателях", callback_data="view database"))
         keyboard.add(types.InlineKeyboardButton(text="Какой сегодня день", callback_data="What day is today"))
+        keyboard.add(types.InlineKeyboardButton(text="Подобрать фон для рабочего стола", callback_data="Image search"))
         await message.answer("Выберите одну из следующих функций", reply_markup=keyboard)
+        time_update(user_id=user_id)
 
 @dp.callback_query_handler(text="What day is today")
 async def What_day_is_today(call: types.CallbackQuery):
@@ -129,13 +130,15 @@ async def What_day_is_today(call: types.CallbackQuery):
     dictionary = {"\xa0": "", "   ": "\n", "    ": "\n", "0": "", "1": " ", "2": "", "3": "", "4": "",
                   "5": "", "6": "", "7": "", "8": "", "9": "", "  ": "", "\n ": "\n"}
     page = multiple_replace(page, dictionary)
-    await call.message.answer( "Сегодня: \n" + page)
+    await call.message.answer( f"Сегодня: \n {page}")
     await call.message.answer("/start\n/help\n/dice\n/func_menu")
+    time_update(user_id=user_id)
 
 @dp.callback_query_handler(text="view database")
 async def view_database(call: types.CallbackQuery):
     await call.message.answer(user_base)
     await call.message.answer("/start\n/help\n/dice\n/func_menu")
+
 
 @dp.callback_query_handler(text="Connect administrator rights")
 async def Connect_administrator_rights(call: types.CallbackQuery):
@@ -153,13 +156,20 @@ async def Change_nickname(call: types.CallbackQuery):
     await call.message.answer("В следующем сообщении укажите свой новый ник")
     global ch_log
     ch_log = 1
+
+@dp.callback_query_handler(text="Image search")
+async def Image_search(call: types.CallbackQuery):
+    await call.message.answer("В следующем сообщении укажите ключевое слово по которому будет производиться поиск")
+    global Im_sear
+    Im_sear = 1
+
 def multiple_replace(page, dictionary):
         for i, j in dictionary.items():
             page = page.replace(i, j)
         return page
 @dp.message_handler()
 async def processing_message(message: types.Message):
-    global user_base ,user_name_base ,ch_log , con_adm_rig
+    global user_base ,user_name_base ,ch_log , con_adm_rig ,Im_sear
     user_id_base = user_base['id'].tolist()
     user_name_base = user_base['name'].tolist()
     user_id = message.from_user.id
@@ -181,7 +191,7 @@ async def processing_message(message: types.Message):
                     log = index
                     user_base.at[index, 'name'] = message.text
                     user_base.to_excel("user_base.xlsx")
-                    await bot.send_message(message.from_user.id, "Отлично я успешно сменил ваш ник на " + message.text)
+                    await bot.send_message(message.from_user.id, f"Отлично я успешно сменил ваш ник на {message.text}")
                     await bot.send_message(message.from_user.id, "/start\n/help\n/dice\n/func_menu")
                     ch_log = 0
     elif con_adm_rig == 1:
@@ -199,6 +209,60 @@ async def processing_message(message: types.Message):
         else:
             await bot.send_message(message.from_user.id,"Неверный пароль")
         con_adm_rig = 0
+        time_update(user_id=user_id)
+    elif Im_sear == 1:
+        time_update(user_id=user_id)
+        images = 1
+        pg = 1
+        num_page = 1
+        keyword = message.text
+        ip =  await ip_database_manager()
+        proxies = {'http':f'http://{ip}'}
+        while pg == 1 and images != 11:
+            link = f'https://zastavok.net'
+            request = f'/search/{keyword}'
+            url = f'{link}/{request}/{num_page}/'
+            response = requests.get(url,proxies = proxies).text
+            if ('ничего не найдено' in response) == False:
+                await bot.send_message(message.from_user.id,"Нашёл несколько интересных изображений по вашему запросу, сейчас перешлю вам")
+                time.sleep(5)
+                page = BeautifulSoup(response, "lxml")
+                block = page.find('div', class_='main')
+                num = page.find('div', id='clsLink3')
+                if images == 1:
+                    maximum_number_of_pages = num.find_all('a')
+                    maximum_number_of_pages = maximum_number_of_pages.__str__()
+                    if maximum_number_of_pages != '[]':
+                        maximum_number_of_pages = maximum_number_of_pages[(maximum_number_of_pages.rfind("</a>,")) - 1]
+                        maximum_number_of_pages = int(maximum_number_of_pages)
+                    else:
+                        maximum_number_of_pages = 1
+                Pictures = block.find_all('div', class_='short_full')
+                for image in Pictures:
+                    chek = image.find('img').get('alt')
+                    if ((f'{keyword} ' in chek) or (f'{keyword.lower()} ' in chek) or (keyword == chek) or (
+                            keyword.lower() == chek)) and images != 11:
+                        image_link = image.find('a').get('href')
+                        download = requests.get(f'{link}{image_link}').text
+                        download_page = BeautifulSoup(download, 'lxml')
+                        download_blok = download_page.find('div', class_='image_data').find('div', class_='block_down')
+                        download_link = download_blok.find('a').get('href')
+                        image_bytes = requests.get(f'{link}{download_link}').content
+                        with open(f'picture/{chek}.jpg', 'wb') as file:
+                            file.write(image_bytes)
+
+                        with open(f'picture/{chek}.jpg', 'rb') as photo:
+                            await bot.send_photo(chat_id=message.chat.id, photo=photo)
+                        os.remove(f'picture/{chek}.jpg')
+                        images += 1
+                if maximum_number_of_pages == num_page:
+                    pg = 0
+                else:
+                    num_page += 1
+            else:
+                await bot.send_message(message.from_user.id,"По вашему запросу ничего не найдено")
+                pg = 0
+        await bot.send_message(message.from_user.id, "/start\n/help\n/dice\n/func_menu")
     elif message.text == "Привет" or message.text == "привет":
         status_base = user_base['status'].tolist()
         log = -1
@@ -207,10 +271,10 @@ async def processing_message(message: types.Message):
                 if user_id_base[index] == user_id:
                     log = index
                     if status_base[index] == 'Online':
-                        await bot.send_message(message.from_user.id, 'Привет ' + user_name_base[index])
+                        await bot.send_message(message.from_user.id, f"Привет {user_name_base[index]}")
                         await bot.send_message(message.from_user.id,"/start\n/help\n/dice\n/func_menu")
                     else:
-                        await bot.send_message(message.from_user.id, 'Привет ' + user_name_base[index] + ' давно не виделись')
+                        await bot.send_message(message.from_user.id, f"Привет {user_name_base[index]} давно не виделись")
                         await bot.send_message(message.from_user.id, "/start\n/help\n/dice\n/func_menu")
                     time_update(user_id=user_id)
     elif "Погода в" in message.text:
@@ -227,7 +291,7 @@ async def processing_message(message: types.Message):
             f1 = translator.translate( list[(list.find("main") + 6):(list.find("description")-2)], src='en', dest='ru')
             f2 = translator.translate( (list[(list.find("temp") + 5):(list.find("feels_like")-2)]),  src='en', dest='ru')
             f3 = translator.translate( list[(list.find("wind") + 7):(list.find("deg")-2)],  src='en', dest='ru')
-            res = "Погода:" + f1.text  + "\nТемпература:" + f2.text+ " C" + "\nВетер:" + f3.text + "м/с"
+            res = f"Погода: {f1.text}  \nТемпература: {f2.text} C \nВетер:{f3.text} м/с"
             await bot.send_message(message.from_user.id,res)
             await bot.send_message(message.from_user.id, "/start\n/help\n/dice\n/func_menu")
        else:
@@ -253,12 +317,26 @@ def base_call(id , message):
     conn.close()
 async def send_message(id ,message):
     await bot.send_message(id,message)
+async def get_new_ip_list():
+    global ip_list
+    request = 'https://free-proxy-list.net'
+    response = requests.get(request).text
+    ip_list_string = response[(response.find('UTC.\n') + 6):(response.find('</textarea>'))]
+    for element in range(0, ip_list_string.count('\n')):
+        ip_list.append(ip_list_string[0:ip_list_string.find('\n')])
+        ip_list_string = ip_list_string[(ip_list_string.find('\n')) + 2:len(ip_list_string)]
 
+async def ip_database_manager():
+    global ip_list , element
+    if ip_list == [] or element == len(ip_list):
+        await get_new_ip_list()
+    element += 1
+    return ip_list[element]
 async def status_chek():
     print('start')
     while True:
         now = datetime.now()
-        print("status_chek started:"+str(now))
+        print(f"status_chek started:{str(now)}")
         current_time_m = int(now.strftime("%M"))
         current_time_h = int(now.strftime("%H"))
         current_time_d = int(now.strftime("%d"))
@@ -282,9 +360,9 @@ async def status_chek():
                 else:
                     user_base.at[index, 'status'] = "Online"
                     user_base.to_excel("user_base.xlsx")
-        # await send_message(1258306656,"status_chek completed:" + str(now))
+        await send_message(1258306656,"status_chek completed:" + str(now))
         now = datetime.now()
-        print("status_chek completed:" + str(now))
+        print(f"status_chek completed: {str(now)}")
         await asyncio.sleep(60*30)
 
 #threading.Thread(target=status_chek,args=(),daemon=True).start()
